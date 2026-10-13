@@ -1,0 +1,12 @@
+{
+  "name": "captcha-solver",
+  "version": "0.1.0",
+  "private": true,
+  "main": "captcha_solver.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
