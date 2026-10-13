@@ -4,9 +4,15 @@
   "private": true,
   "main": "captcha_solver.js",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.9.0"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "ocr": "node scripts/ocr.js",
+    "dataset": "node scripts/generate_dataset.js",
+    "benchmark": "node scripts/benchmark.js"
+  },
+  "dependencies": {
+    "sharp": "0.35.5"
   }
 }
