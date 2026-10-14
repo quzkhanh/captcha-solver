@@ -10,7 +10,7 @@ const { modelPath } = require('./models');
 const { boxIou, meanAveragePrecision } = require('./evaluator');
 const { solidImage, noiseImage } = require('./fixtures');
 
-const SPLIT_DIR = path.join(__dirname, '..', 'dataset', 'object_detection', 'dev');
+const SPLIT_DIR = path.join(__dirname, '..', '..', 'dataset', 'object_detection', 'dev');
 const modelMissing = !fs.existsSync(modelPath('yolox-tiny')) && 'yolox-tiny model not downloaded (run: npm run od:model)';
 const datasetMissing = !fs.existsSync(path.join(SPLIT_DIR, 'labels.json')) && 'dev split not prepared (run: npm run od:dataset)';
 const samples = datasetMissing ? [] : JSON.parse(fs.readFileSync(path.join(SPLIT_DIR, 'labels.json'), 'utf8')).samples;

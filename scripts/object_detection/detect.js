@@ -2,13 +2,13 @@
 /**
  * Detects objects in one image.
  *
- *   node scripts/detect.js <image> [--model yolox-tiny] [--score 0.3] [--json]
+ *   node scripts/object_detection/detect.js <image> [--model yolox-tiny] [--score 0.3] [--json]
  *
  * Prints one line per detection (or the full result with --json). Exits with code 1 when detection fails.
  */
-const { detectObjects, createYoloxAdapter, DEFAULT_MODEL, DEFAULT_OPTIONS } = require('../object_detection');
+const { detectObjects, createYoloxAdapter, DEFAULT_MODEL, DEFAULT_OPTIONS } = require('../../src/object_detection');
 
-const USAGE = 'Usage: node scripts/detect.js <image> [--model yolox-tiny] [--score 0.3] [--json]';
+const USAGE = 'Usage: node scripts/object_detection/detect.js <image> [--model yolox-tiny] [--score 0.3] [--json]';
 
 function parseArgs(argv) {
   const args = { image: undefined, model: DEFAULT_MODEL, scoreThreshold: DEFAULT_OPTIONS.scoreThreshold, json: false };

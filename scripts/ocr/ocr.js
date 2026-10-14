@@ -2,13 +2,13 @@
 /**
  * Recognises the text in one image.
  *
- *   node scripts/ocr.js <image> [--no-preprocess] [--lang eng] [--psm 3] [--json]
+ *   node scripts/ocr/ocr.js <image> [--no-preprocess] [--lang eng] [--psm 3] [--json]
  *
  * Prints the text (or the full result with --json). Exits with code 1 when recognition fails.
  */
-const { recognizeImage, createTesseractAdapter } = require('../image_ocr');
+const { recognizeImage, createTesseractAdapter } = require('../../src/image_ocr');
 
-const USAGE = 'Usage: node scripts/ocr.js <image> [--no-preprocess] [--lang eng] [--psm 3] [--json]';
+const USAGE = 'Usage: node scripts/ocr/ocr.js <image> [--no-preprocess] [--lang eng] [--psm 3] [--json]';
 
 function parseArgs(argv) {
   const args = { image: undefined, preprocessing: true, language: 'eng', psm: 3, json: false };

@@ -2,15 +2,15 @@
 /**
  * Runs the OCR module over a generated split and reports accuracy and latency per preprocessing configuration.
  *
- *   node scripts/benchmark.js [--split test] [--configs raw,default] [--psm 3] [--out benchmark-results]
+ *   node scripts/ocr/benchmark.js [--split test] [--configs raw,default] [--psm 3] [--out benchmark-results/ocr]
  *
  * Only the image path is passed to recognizeImage(); labels.json is read separately and used for scoring only.
  * Images run one at a time so latency figures are not distorted by parallel Tesseract processes.
  */
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { recognizeImage, createTesseractAdapter, DEFAULT_PREPROCESSING } = require('../image_ocr');
-const { summarize } = require('../image_ocr/evaluator');
+const { recognizeImage, createTesseractAdapter, DEFAULT_PREPROCESSING } = require('../../src/image_ocr');
+const { summarize } = require('../../src/image_ocr/evaluator');
 
 const CONFIGS = {
   raw: false,
@@ -24,7 +24,7 @@ const CONFIGS = {
 };
 
 function parseArgs(argv) {
-  const args = { split: 'test', configs: ['raw', 'default'], psm: 3, out: 'benchmark-results', dataset: 'dataset' };
+  const args = { split: 'test', configs: ['raw', 'default'], psm: 3, out: 'benchmark-results/ocr', dataset: 'dataset/ocr' };
   for (let index = 0; index < argv.length; index += 2) {
     const [flag, value] = [argv[index], argv[index + 1]];
     if (flag === '--split' && value) args.split = value;

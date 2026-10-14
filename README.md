@@ -24,10 +24,25 @@ npm install
 npm test
 ```
 
+## Cấu trúc thư mục
+
+```
+src/
+  captcha_solver.js            solve(): text, image (qua image_ocr), test key hCaptcha/Turnstile
+  image_ocr/                   OCR tổng quát (Tesseract)
+  object_detection/            nhận diện vật thể (YOLOX ONNX), độc lập với hai phần trên
+scripts/
+  ocr/                         ocr.js · generate_dataset.js · benchmark.js
+  object_detection/            detect.js · download_model.js · prepare_dataset.js · benchmark.js
+models/  dataset/  benchmark-results/    sinh ra lúc chạy, không commit (.gitignore)
+```
+
+Test nằm cạnh code (`*.test.js`), `npm test` tự tìm và chạy tất cả.
+
 ## API
 
 ```js
-const { solve, Status, TEST_KEYS, TEST_ENVIRONMENTS } = require('./captcha_solver');
+const { solve, Status, TEST_KEYS, TEST_ENVIRONMENTS } = require('./src/captcha_solver');
 
 const result = await solve('text', { challenge: 'What is 5 + 3?' });
 // { status: 'success', type: 'text', value: '8' }
@@ -96,7 +111,7 @@ await solve('image', { image: 'fixtures/challenge.png' });   // đường dẫn 
 Chạy thử trên ảnh của bạn:
 
 ```bash
-NODE_ENV=test node -e 'require("./captcha_solver").solve("image", { image: process.argv[1] }).then((r) => console.log(r))' path/to/image.png
+NODE_ENV=test node -e 'require("./src/captcha_solver").solve("image", { image: process.argv[1] }).then((r) => console.log(r))' path/to/image.png
 ```
 
 ### `hcaptcha`, `turnstile`, `recaptcha`: chỉ dùng test key chính thức
@@ -160,18 +175,18 @@ Module là engine phía sau `solve('image')` (xem [`image`](#image)), và cũng 
 ### Kiến trúc
 
 ```
-recognizeImage(source, options)                       image_ocr/index.js
+recognizeImage(source, options)                       src/image_ocr/index.js
   │  kiểm tra options (limits, preprocessing, engine)  → INVALID_OPTIONS
-  ├─ ImageInputValidator   image_ocr/validator.js       → stage "input"
+  ├─ ImageInputValidator   src/image_ocr/validator.js       → stage "input"
   │    đọc file/Buffer, giới hạn byte, magic bytes, header (kích thước, số pixel), decode đầy đủ
-  ├─ ImagePreprocessor     image_ocr/preprocessor.js    → stage "preprocessing"
+  ├─ ImagePreprocessor     src/image_ocr/preprocessor.js    → stage "preprocessing"
   │    grayscale → invert → denoise → contrast → deskew → upscale → threshold, mỗi bước bật/tắt được
-  ├─ OcrEngineAdapter      image_ocr/tesseract_adapter.js → stage "engine"
+  ├─ OcrEngineAdapter      src/image_ocr/tesseract_adapter.js → stage "engine"
   │    Tesseract CLI, ảnh PNG qua stdin, kết quả TSV qua stdout (không có file tạm)
-  └─ OcrResultNormalizer   image_ocr/normalizer.js
+  └─ OcrResultNormalizer   src/image_ocr/normalizer.js
        chuẩn hoá text, giữ nguyên confidence từng từ
-OcrEvaluator               image_ocr/evaluator.js       CER, WER, exact match, p95 (chỉ dùng cho benchmark)
-scripts/generate_dataset.js · scripts/benchmark.js · scripts/ocr.js
+OcrEvaluator               src/image_ocr/evaluator.js       CER, WER, exact match, p95 (chỉ dùng cho benchmark)
+scripts/ocr/ocr.js · scripts/ocr/generate_dataset.js · scripts/ocr/benchmark.js
 ```
 
 ### Yêu cầu môi trường
@@ -203,9 +218,9 @@ Cần thêm ngôn ngữ khác thì cài gói `tesseract-ocr-<lang>` (ví dụ `t
 ### Chạy OCR trên một ảnh
 
 ```bash
-node scripts/ocr.js path/to/image.png             # in text
-node scripts/ocr.js path/to/image.png --json      # in toàn bộ kết quả
-node scripts/ocr.js path/to/image.png --no-preprocess --lang eng --psm 6
+node scripts/ocr/ocr.js path/to/image.png             # in text
+node scripts/ocr/ocr.js path/to/image.png --json      # in toàn bộ kết quả
+node scripts/ocr/ocr.js path/to/image.png --no-preprocess --lang eng --psm 6
 ```
 
 ```js
@@ -284,8 +299,8 @@ Default được chọn **chỉ dựa trên split `dev`**. Trên dev, `contrast`
 
 ```bash
 npm test                                       # toàn bộ: captcha_solver + image_ocr
-node --test captcha_solver.image.test.js       # solve('image') với OCR thật, không mock
-node --test image_ocr/integration.test.js      # recognizeImage() với Tesseract thật
+node --test src/captcha_solver.image.test.js     # solve('image') với OCR thật, không mock
+node --test src/image_ocr/integration.test.js    # recognizeImage() với Tesseract thật
 ```
 
 Unit test mock engine qua interface adapter, và dùng script shell giả lập để kiểm tra các trường hợp thiếu binary, crash, timeout và thiếu ngôn ngữ. `integration.test.js` chạy Tesseract thật, và tự skip kèm lý do khi máy không có Tesseract. Ảnh test được render trong bộ nhớ. Thư mục tạm chỉ được tạo trong test và bị xoá ở `after()`.
@@ -294,10 +309,10 @@ Unit test mock engine qua interface adapter, và dùng script shell giả lập 
 
 ```bash
 npm run dataset                                       # tạo cả dev và test
-node scripts/generate_dataset.js --split test --per-group 50 --out /tmp/ocr-dataset
+node scripts/ocr/generate_dataset.js --split test --per-group 50 --out /tmp/ocr-dataset
 ```
 
-- `dataset/<split>/images/` chỉ chứa ảnh. Ground-truth nằm riêng ở `dataset/<split>/labels.json`.
+- `dataset/ocr/<split>/images/` chỉ chứa ảnh. Ground-truth nằm riêng ở `dataset/ocr/<split>/labels.json`.
 - Split `dev` (seed 1001, 8 ảnh/nhóm) dùng để chọn cấu hình. Split `test` (seed 2002, 20 ảnh/nhóm) chỉ dùng để báo cáo. Không có mô hình nào được huấn luyện.
 - Chạy cùng máy thì sinh lại ra file giống hệt từng byte (đã kiểm tra bằng sha256). Sang máy khác, pixel có thể khác nếu font khác.
 - Nhóm ảnh: `clean` (9 font thuộc 3 họ DejaVu/Liberation/Noto gồm sans, serif, mono; cỡ 18–40 px; xoay vòng 5 định dạng ảnh), `small_text` (8–13 px), `multiline`, `dark_background`, `low_contrast` (chênh lệch độ sáng 12–50), `noise_moderate` (σ 10–20), `noise_heavy` (σ 30–65), `blur` (Gaussian σ 0.8–2.8), `rotated` (±1.5–9°), `blank` (trắng, tối, nhiễu, gradient), `invalid` (file rỗng, PNG/JPEG cắt cụt, signature PNG kèm dữ liệu rác, BMP, SVG, PDF, file text đặt đuôi .png, AVIF, ảnh 12000×200, ảnh 6000×5000).
@@ -308,11 +323,11 @@ node scripts/generate_dataset.js --split test --per-group 50 --out /tmp/ocr-data
 
 ```bash
 npm run benchmark                                            # split test, so sánh raw và default
-node scripts/benchmark.js --split dev --configs all          # ablation từng bước trên dev
-node scripts/benchmark.js --configs raw,default,with-otsu --psm 6
+node scripts/ocr/benchmark.js --split dev --configs all          # ablation từng bước trên dev
+node scripts/ocr/benchmark.js --configs raw,default,with-otsu --psm 6
 ```
 
-Kết quả được in ra dạng Markdown và lưu vào `benchmark-results/<split>-psm<n>.{md,json}` (file JSON chứa cả prediction của từng ảnh). Benchmark chỉ truyền đường dẫn ảnh vào `recognizeImage()`. `labels.json` chỉ được đọc để chấm điểm. Các ảnh được chạy tuần tự để số đo thời gian không bị nhiễu.
+Kết quả được in ra dạng Markdown và lưu vào `benchmark-results/ocr/<split>-psm<n>.{md,json}` (file JSON chứa cả prediction của từng ảnh). Benchmark chỉ truyền đường dẫn ảnh vào `recognizeImage()`. `labels.json` chỉ được đọc để chấm điểm. Các ảnh được chạy tuần tự để số đo thời gian không bị nhiễu.
 
 **Chuẩn hoá trước khi tính metric**: chuẩn hoá Unicode NFC, gộp mọi chuỗi khoảng trắng (kể cả xuống dòng) thành một dấu cách, trim hai đầu. **Không** bỏ qua khác biệt hoa/thường, dấu câu, chữ số hay dấu thanh.
 CER = tổng edit distance ký tự / tổng số ký tự tham chiếu. WER tính tương tự theo từ. Ảnh xử lý lỗi được tính là output rỗng.
@@ -384,7 +399,7 @@ await recognizeImage(image, { engine: myEngine });
 - Ném `new OcrError(OcrErrorCode.ENGINE_UNAVAILABLE | ENGINE_TIMEOUT | ENGINE_ERROR, message)` để báo lỗi có phân loại. Mọi lỗi khác bị đổi thành `ENGINE_ERROR` và message gốc bị ẩn.
 - Không có confidence thì bỏ `words` hoặc để `confidence: null`. Module không tự tạo ra score.
 - Nếu engine cần định dạng khác PNG hoặc đã có tiền xử lý riêng, truyền `preprocessing: false`.
-- Có thể đưa engine vào benchmark bằng cách thay `createTesseractAdapter(...)` trong `scripts/benchmark.js`.
+- Có thể đưa engine vào benchmark bằng cách thay `createTesseractAdapter(...)` trong `scripts/ocr/benchmark.js`.
 
 ---
 
@@ -414,16 +429,16 @@ Lý do chọn:
 ### Kiến trúc
 
 ```
-detectObjects(source, options)                          object_detection/index.js
+detectObjects(source, options)                          src/object_detection/index.js
   │  kiểm tra options (thresholds, maxDetections, limits, detector)  → INVALID_OPTIONS
-  ├─ validator             object_detection/validator.js    → stage "input"
+  ├─ validator             src/object_detection/validator.js    → stage "input"
   │    đọc file/Buffer, giới hạn byte, magic bytes, kích thước min/max, decode đầy đủ → sRGB 3 kênh
-  ├─ Detector adapter      object_detection/yolox_adapter.js → stage "model" / "inference"
+  ├─ Detector adapter      src/object_detection/yolox_adapter.js → stage "model" / "inference"
   │    letterbox → tensor BGR planar → onnxruntime-node → decode + NMS → toạ độ ảnh gốc
   │    yolox_postprocess.js (anchor grid, decode, NMS: hàm thuần) · models.js (registry + SHA-256)
   └─ chuẩn hoá kết quả: kiểm tra output của adapter, đổi sang {x, y, width, height}, lọc ngưỡng, sắp xếp, cắt maxDetections
 evaluator.js              mAP@.5, mAP@.5:.95, precision/recall/F1 (chỉ dùng cho benchmark và test)
-scripts/detect.js · scripts/od_download_model.js · scripts/od_prepare_dataset.js · scripts/od_benchmark.js
+scripts/object_detection/detect.js · download_model.js · prepare_dataset.js · benchmark.js
 ```
 
 ### Yêu cầu môi trường
@@ -530,7 +545,7 @@ Adapter là object bất kỳ có `name` và `detect(image, { scoreThreshold, io
 
 `detectObjects()` kiểm tra output (box nằm trong ảnh, confidence trong 0–1, `className` khác rỗng), nên một adapter lỗi không thể làm hỏng schema kết quả.
 
-- **Model YOLOX khác** (S/M/L, kích thước đầu vào khác, hoặc model tự train): `createYoloxAdapter({ modelPath, classNames })`. Kích thước đầu vào được đọc từ metadata của model; số lớp phải khớp `classNames`. Để model có trong `npm run od:model`, thêm một mục vào `object_detection/models.js` kèm URL và SHA-256.
+- **Model YOLOX khác** (S/M/L, kích thước đầu vào khác, hoặc model tự train): `createYoloxAdapter({ modelPath, classNames })`. Kích thước đầu vào được đọc từ metadata của model; số lớp phải khớp `classNames`. Để model có trong `npm run od:model`, thêm một mục vào `src/object_detection/models.js` kèm URL và SHA-256.
 - **Kiến trúc khác** (SSD, RT-DETR, D-FINE...): viết adapter mới cùng interface. API `detectObjects()` và benchmark không phải sửa (benchmark hiện tạo adapter bằng `createYoloxAdapter`, nên chỉ cần đổi dòng đó).
 
 ### Dataset
@@ -556,7 +571,7 @@ Script tải annotation COCO 2017 (~253 MB, chỉ một lần, file zip bị xo�
 
 ```bash
 npm test                                     # toàn bộ repo
-node --test 'object_detection/*.test.js'     # chỉ module này
+node --test 'src/object_detection/*.test.js' # chỉ module này
 ```
 
 - **Unit test** (không cần model): validator (mọi định dạng, ảnh xám, alpha, EXIF, mọi mã lỗi đầu vào), decode/NMS/IoU với tensor viết tay, letterbox và chuyển BGR, evaluator (AP, crowd, P/R), schema và mapping lỗi của `detectObjects()`. Riêng `DEPENDENCY_MISSING` được kiểm tra trong một process con có `onnxruntime-node` bị ẩn khỏi `require`.
@@ -580,7 +595,7 @@ Kết quả lần chạy cuối: `npm test` → **388/388 pass**, 0 skip (316 te
 
 ```bash
 npm run od:benchmark                                          # split test, cả hai model
-node scripts/od_benchmark.js --split dev --models yolox-tiny --threads 4
+node scripts/object_detection/benchmark.js --split dev --models yolox-tiny --threads 4
 ```
 
 Kết quả in dạng Markdown và lưu vào `benchmark-results/object_detection/<split>.{md,json}`. Mỗi model chạy trong một process con riêng để số đo bộ nhớ không bị lẫn giữa các model.

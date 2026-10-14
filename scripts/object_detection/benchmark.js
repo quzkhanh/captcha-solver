@@ -2,7 +2,7 @@
 /**
  * Benchmarks object detection models on a prepared split: accuracy, latency and memory.
  *
- *   node scripts/od_benchmark.js [--split test] [--models yolox-tiny,yolox-nano] [--threads N] [--out benchmark-results/object_detection]
+ *   node scripts/object_detection/benchmark.js [--split test] [--models yolox-tiny,yolox-nano] [--threads N] [--out benchmark-results/object_detection]
  *
  * Each model runs in its own child process, so memory figures are not mixed between models. Per model:
  *   pass 1 (score >= 0.01, max 100 per image) feeds mAP; P/R/F1 at the default threshold are the same detections
@@ -14,8 +14,8 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { MODELS, DEFAULT_OPTIONS } = require('../object_detection');
-const { meanAveragePrecision, precisionRecall, boxIou, percentile, mean } = require('../object_detection/evaluator');
+const { MODELS, DEFAULT_OPTIONS } = require('../../src/object_detection');
+const { meanAveragePrecision, precisionRecall, boxIou, percentile, mean } = require('../../src/object_detection/evaluator');
 
 const EVAL_THRESHOLD = 0.01;
 const SWEEP = [0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6];
@@ -49,7 +49,7 @@ async function loadLabels(args) {
 async function worker(args) {
   const rss = () => process.memoryUsage.rss();
   const rssStart = rss();
-  const { detectObjects, createYoloxAdapter } = require('../object_detection');
+  const { detectObjects, createYoloxAdapter } = require('../../src/object_detection');
   const { splitDir, labels } = await loadLabels(args);
   const detector = createYoloxAdapter({ model: args.models[0], threads: args.threads });
   const loadStarted = performance.now();

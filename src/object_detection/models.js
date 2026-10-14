@@ -1,6 +1,6 @@
 const path = require('node:path');
 
-const MODELS_DIR = path.join(__dirname, '..', 'models');
+const MODELS_DIR = path.join(__dirname, '..', '..', 'models');
 
 // Official YOLOX ONNX exports, Apache-2.0: https://github.com/Megvii-BaseDetection/YOLOX
 // cocoMap is the authors' published COCO val2017 mAP@0.5:0.95 at 416x416; sha256 was computed on download.

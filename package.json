@@ -2,19 +2,19 @@
   "name": "captcha-solver",
   "version": "0.1.0",
   "private": true,
-  "main": "captcha_solver.js",
+  "main": "src/captcha_solver.js",
   "engines": {
     "node": ">=20.9.0"
   },
   "scripts": {
     "test": "node --test",
-    "ocr": "node scripts/ocr.js",
-    "dataset": "node scripts/generate_dataset.js",
-    "benchmark": "node scripts/benchmark.js",
-    "detect": "node scripts/detect.js",
-    "od:model": "node scripts/od_download_model.js",
-    "od:dataset": "node scripts/od_prepare_dataset.js",
-    "od:benchmark": "node scripts/od_benchmark.js"
+    "ocr": "node scripts/ocr/ocr.js",
+    "dataset": "node scripts/ocr/generate_dataset.js",
+    "benchmark": "node scripts/ocr/benchmark.js",
+    "detect": "node scripts/object_detection/detect.js",
+    "od:model": "node scripts/object_detection/download_model.js",
+    "od:dataset": "node scripts/object_detection/prepare_dataset.js",
+    "od:benchmark": "node scripts/object_detection/benchmark.js"
   },
   "dependencies": {
     "onnxruntime-node": "1.30.0",

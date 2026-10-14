@@ -2,19 +2,19 @@
 /**
  * Downloads the registered object detection models into models/ and verifies their SHA-256.
  *
- *   node scripts/od_download_model.js [--model yolox-tiny|yolox-nano|all]
+ *   node scripts/object_detection/download_model.js [--model yolox-tiny|yolox-nano|all]
  *
  * A file that is already present with the right hash is not downloaded again.
  */
 const fs = require('node:fs/promises');
 const { createHash } = require('node:crypto');
-const { MODELS, MODELS_DIR, DEFAULT_MODEL, modelPath } = require('../object_detection/models');
+const { MODELS, MODELS_DIR, DEFAULT_MODEL, modelPath } = require('../../src/object_detection/models');
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 function parseArgs(argv) {
   if (argv.length === 0) return [DEFAULT_MODEL];
-  if (argv.length !== 2 || argv[0] !== '--model') throw new Error('Usage: od_download_model.js [--model <name>|all]');
+  if (argv.length !== 2 || argv[0] !== '--model') throw new Error('Usage: download_model.js [--model <name>|all]');
   if (argv[1] === 'all') return Object.keys(MODELS);
   if (!Object.hasOwn(MODELS, argv[1])) throw new Error(`Unknown model "${argv[1]}". Available: ${Object.keys(MODELS).join(', ')}, all`);
   return [argv[1]];

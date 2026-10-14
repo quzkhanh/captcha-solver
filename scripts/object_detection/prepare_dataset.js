@@ -2,7 +2,7 @@
 /**
  * Builds the object detection evaluation set under dataset/object_detection/<split>/ (git-ignored).
  *
- *   node scripts/od_prepare_dataset.js [--out dataset/object_detection] [--dev 60] [--test 200] [--composites 20]
+ *   node scripts/object_detection/prepare_dataset.js [--out dataset/object_detection] [--dev 60] [--test 200] [--composites 20]
  *
  * Groups per split:
  *   coco      - COCO val2017 photos whose Flickr licence allows reuse and adaptation (CC BY 2.0, CC BY-SA 2.0,
@@ -18,7 +18,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const sharp = require('sharp');
-const COCO_CLASSES = require('../object_detection/coco_classes');
+const COCO_CLASSES = require('../../src/object_detection/coco_classes');
 
 const ANNOTATIONS_ZIP = 'http://images.cocodataset.org/annotations/annotations_trainval2017.zip';
 const ALLOWED_LICENSE_URLS = new Set([

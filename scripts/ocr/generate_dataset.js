@@ -2,7 +2,7 @@
 /**
  * Generates a small synthetic OCR dataset that can be rebuilt byte for byte from fixed seeds.
  *
- *   node scripts/generate_dataset.js [--out dataset] [--split dev|test|all] [--per-group N]
+ *   node scripts/ocr/generate_dataset.js [--out dataset/ocr] [--split dev|test|all] [--per-group N]
  *
  * Layout: <out>/<split>/images/* holds only images; the ground truth lives separately in <out>/<split>/labels.json.
  * The "dev" split (its own seed) is for choosing preprocessing defaults; report accuracy on "test" only.
@@ -233,7 +233,7 @@ async function generateSplit(outRoot, split, { seed, perGroup }) {
 }
 
 function parseArgs(argv) {
-  const args = { out: 'dataset', split: 'all', perGroup: undefined };
+  const args = { out: 'dataset/ocr', split: 'all', perGroup: undefined };
   for (let index = 0; index < argv.length; index += 2) {
     const [flag, value] = [argv[index], argv[index + 1]];
     if (flag === '--out' && value) args.out = value;
