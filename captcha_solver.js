@@ -2,7 +2,7 @@
  * CAPTCHA helper for development/staging environments.
  *
  * Every call resolves to { status, type, value } on success or
- * { status, type, error } otherwise; text failures also carry an ErrorCode in `code`.
+ * { status, type, error } otherwise; text and image failures also carry an error code in `code`.
  * Results are never fabricated: anything that cannot be handled reports FAILURE or UNSUPPORTED.
  */
 
@@ -19,6 +19,8 @@ const ErrorCode = Object.freeze({
   DIVISION_BY_ZERO: 'DIVISION_BY_ZERO',
   OUT_OF_RANGE: 'OUT_OF_RANGE',
   INEXACT_RESULT: 'INEXACT_RESULT',
+  NO_TEXT_DETECTED: 'NO_TEXT_DETECTED',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
 });
 
 const MAX_CHALLENGE_LENGTH = 256;
@@ -75,7 +77,7 @@ const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 const HANDLERS = {
   text: solveText,
-  image: () => [Status.UNSUPPORTED, 'Image CAPTCHA solving is not implemented'],
+  image: solveImage,
   recaptcha: (input) => solveWithTestKey('recaptcha', input),
   hcaptcha: (input) => solveWithTestKey('hcaptcha', input),
   turnstile: (input) => solveWithTestKey('turnstile', input),
@@ -83,14 +85,14 @@ const HANDLERS = {
 
 /**
  * @param {string} type - One of: text, image, recaptcha, hcaptcha, turnstile
- * @param {{challenge?: string, siteKey?: string}} [input]
+ * @param {{challenge?: string, siteKey?: string, image?: Buffer | Uint8Array | string}} [input]
  * @returns {Promise<{status: string, type: *, value?: string, code?: string, error?: string}>}
  */
 async function solve(type, input) {
   if (typeof type !== 'string' || !Object.hasOwn(HANDLERS, type)) {
     return { status: Status.UNSUPPORTED, type, error: `Unsupported CAPTCHA type: ${String(type)}` };
   }
-  const [status, detail, code] = HANDLERS[type](input);
+  const [status, detail, code] = await HANDLERS[type](input);
   if (status === Status.SUCCESS) return { status, type, value: detail };
   return code ? { status, type, code, error: detail } : { status, type, error: detail };
 }
@@ -230,14 +232,27 @@ function formatExact({ n, d }) {
   return places ? `${sign}${digits.slice(0, -places)}.${digits.slice(-places)}` : `${sign}${digits}`;
 }
 
+// input.image is passed to the OCR module unchanged; it validates the bytes or file path itself.
+async function solveImage(input) {
+  if (!isTestEnvironment()) return notInTestEnvironment();
+  let result;
+  try {
+    // Required lazily so the other handlers keep working when sharp is not installed.
+    result = await require('./image_ocr').recognizeImage(input?.image);
+  } catch {
+    return [Status.FAILURE, 'The OCR module could not run', ErrorCode.INTERNAL_ERROR];
+  }
+  if (result.status !== Status.SUCCESS) return [Status.FAILURE, result.error, result.code];
+  if (!result.metadata.textDetected) return [Status.FAILURE, 'No text was detected in the image', ErrorCode.NO_TEXT_DETECTED];
+  return [Status.SUCCESS, result.value];
+}
+
 function solveWithTestKey(provider, input) {
   const siteKey = input?.siteKey;
   if (typeof siteKey !== 'string' || !siteKey) {
     return [Status.FAILURE, 'input.siteKey must be a non-empty string'];
   }
-  if (!TEST_ENVIRONMENTS.includes(process.env.NODE_ENV)) {
-    return [Status.UNSUPPORTED, `Only available when NODE_ENV is one of: ${TEST_ENVIRONMENTS.join(', ')}`];
-  }
+  if (!isTestEnvironment()) return notInTestEnvironment();
   const siteKeys = TEST_KEYS[provider].siteKeys;
   if (!Object.hasOwn(siteKeys, siteKey)) {
     return [Status.UNSUPPORTED, `Only official ${provider} test site keys are supported`];
@@ -246,6 +261,14 @@ function solveWithTestKey(provider, input) {
   if (outcome.token) return [Status.SUCCESS, outcome.token];
   if (outcome.failure) return [Status.FAILURE, outcome.failure];
   return [Status.UNSUPPORTED, outcome.unsupported];
+}
+
+function isTestEnvironment() {
+  return TEST_ENVIRONMENTS.includes(process.env.NODE_ENV);
+}
+
+function notInTestEnvironment() {
+  return [Status.UNSUPPORTED, `Only available when NODE_ENV is one of: ${TEST_ENVIRONMENTS.join(', ')}`];
 }
 
 function deepFreeze(object) {

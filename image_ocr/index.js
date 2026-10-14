@@ -1,6 +1,6 @@
 /**
  * General-purpose OCR for ordinary text images (documents, screenshots, synthetic test images).
- * It is deliberately separate from captcha_solver.js and is not wired into solve('image').
+ * captcha_solver.js uses it as the engine behind solve('image').
  *
  * recognizeImage() always resolves and never throws:
  *   { status: 'success', type: 'image_ocr', value, metadata }

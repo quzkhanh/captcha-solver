@@ -6,16 +6,16 @@ Tool **không** vượt được CAPTCHA thật trên production và không đư
 Tool chỉ xử lý được:
 
 - câu hỏi text theo đúng hai mẫu cố định (biểu thức số học, đảo từ);
+- ảnh chứa chữ in rõ ràng, qua module OCR tổng quát `image_ocr/` (Tesseract), chỉ trong môi trường test;
 - test key chính thức mà hCaptcha và Cloudflare Turnstile công bố cho kiểm thử tự động.
 
 Khi không xử lý được, tool trả về `failure` hoặc `unsupported`. Tool **không bao giờ** trả kết quả ngẫu nhiên hay kết quả bịa.
 
-Repo còn có một module **OCR tổng quát** độc lập cho ảnh văn bản thông thường, xem [Module Image OCR](#module-image-ocr-image_ocr).
-Module này **không** được nối vào `solve('image')`.
+`solve('image')` dùng module **OCR tổng quát** cho ảnh văn bản thông thường, xem [Module Image OCR](#module-image-ocr-image_ocr).
 
 ## Cài đặt & chạy test
 
-Yêu cầu Node.js >= 20.9 (do `sharp`). `captcha_solver.js` không dùng dependency nào; `sharp` chỉ phục vụ module OCR.
+Yêu cầu Node.js >= 20.9 (do `sharp`). Chỉ `solve('image')` cần `sharp` và Tesseract (xem [cài đặt](#cài-đặt)); `image_ocr` được require lazily, nên các loại khác vẫn chạy khi thiếu hai thứ này.
 
 ```bash
 npm install
@@ -36,7 +36,7 @@ const result = await solve('text', { challenge: 'What is 5 + 3?' });
 | `status` | Ý nghĩa | Trường kèm theo |
 |---|---|---|
 | `success` | Xử lý được | `value` |
-| `failure` | Input sai định dạng, hoặc loại được hỗ trợ nhưng không giải được input này | `error` |
+| `failure` | Input sai định dạng, hoặc loại được hỗ trợ nhưng không giải được input này | `error`, và `code` với `text`/`image` |
 | `unsupported` | Loại CAPTCHA, site key hoặc môi trường không được hỗ trợ | `error` |
 
 Người gọi phải kiểm tra `status` trước khi dùng `value`.
@@ -46,7 +46,7 @@ Người gọi phải kiểm tra `status` trước khi dùng `value`.
 | `type` | `input` | Trạng thái | Chi tiết |
 |---|---|---|---|
 | `text` | `{ challenge }` | Đã triển khai (hẹp) | Xem bên dưới |
-| `image` | bất kỳ | **Không hỗ trợ** | Luôn trả `unsupported`. OCR tổng quát nằm ở module riêng, không giải CAPTCHA ảnh |
+| `image` | `{ image }` | Đã triển khai (OCR tổng quát) | Chỉ khi `NODE_ENV` là môi trường test. Xem bên dưới |
 | `hcaptcha` | `{ siteKey }` | Chỉ hỗ trợ test key | Trả response token test chính thức |
 | `turnstile` | `{ siteKey }` | Chỉ hỗ trợ test key | Trả dummy token `XXXX.DUMMY.TOKEN.XXXX` |
 | `recaptcha` | `{ siteKey }` | **Không giải được** | Google không công bố response token test, nên luôn trả `unsupported` |
@@ -75,6 +75,27 @@ Khi `failure`, kết quả có thêm trường `code`:
 | `DIVISION_BY_ZERO` | Chia cho 0 ở bất kỳ vị trí nào |
 | `OUT_OF_RANGE` | Toán hạng hoặc kết quả vượt `Number.MAX_SAFE_INTEGER` |
 | `INEXACT_RESULT` | Kết quả không biểu diễn được chính xác bằng số thập phân hữu hạn |
+
+### `image`
+
+```js
+process.env.NODE_ENV = 'test';
+await solve('image', { image: 'fixtures/challenge.png' });   // đường dẫn file, Buffer hoặc Uint8Array
+// { status: 'success', type: 'image', value: 'K7PX9Q' }
+```
+
+- Chỉ chạy khi `NODE_ENV` là `development`, `test` hoặc `staging`, giống các loại widget. Ngoài ra trả `unsupported` và không chạy OCR.
+- `input.image` được chuyển nguyên vẹn vào `recognizeImage()` của `image_ocr/` với cấu hình mặc định (tiền xử lý mặc định, Tesseract `eng`, `--psm 3`). Không có OCR thứ hai hay xử lý riêng cho chữ bị làm méo có chủ đích: ảnh nào module OCR không đọc được thì `solve('image')` cũng không đọc được.
+- `value` là text đã chuẩn hoá của OCR; ảnh nhiều dòng giữ `\n` giữa các dòng. Kết quả theo đúng contract `{ status, type, value }`, không kèm confidence. Cần confidence hoặc tuỳ chọn engine thì gọi thẳng `recognizeImage()`.
+- OCR chạy thành công nhưng không thấy chữ trả `failure` với `NO_TEXT_DETECTED`, không bao giờ trả `success` với chuỗi rỗng.
+- Lỗi của OCR trả `failure`, `code` và `error` lấy nguyên từ module OCR (`INVALID_INPUT`, `FILE_NOT_FOUND`, `EMPTY_INPUT`, `FILE_TOO_LARGE`, `UNSUPPORTED_FORMAT`, `CORRUPTED_IMAGE`, `IMAGE_TOO_LARGE`, `PREPROCESSING_FAILED`, `ENGINE_UNAVAILABLE`, `ENGINE_TIMEOUT`, `ENGINE_ERROR`), xem [bảng mã lỗi](#kết-quả-trả-về).
+- Không load được module OCR (ví dụ thiếu `sharp`) hoặc module ném lỗi bất ngờ trả `failure` với `INTERNAL_ERROR`.
+
+Chạy thử trên ảnh của bạn:
+
+```bash
+NODE_ENV=test node -e 'require("./captcha_solver").solve("image", { image: process.argv[1] }).then((r) => console.log(r))' path/to/image.png
+```
 
 ### `hcaptcha`, `turnstile`, `recaptcha`: chỉ dùng test key chính thức
 
@@ -117,13 +138,14 @@ Các provider đều cảnh báo rằng test key **không có khả năng chốn
 
 ## Giới hạn còn lại
 
-- `solve('image')` không giải CAPTCHA ảnh, và không có kế hoạch bổ sung. Module `image_ocr/` là OCR tổng quát cho ảnh văn bản thông thường, không được tích hợp vào `solve()`.
+- `solve('image')` chỉ là OCR tổng quát cho chữ in rõ ràng. Độ chính xác đã đo chỉ áp dụng cho ảnh văn bản tổng hợp (xem [kết quả](#kết-quả-thực-tế)); chữ bị làm méo, gạch chồng hay dính nhau sẽ đọc sai hoặc thất bại.
+- `solve('image')` không trả confidence, nên người gọi không phân biệt được kết quả chắc chắn với kết quả đoán sai. Mỗi lần gọi spawn một process Tesseract.
 - Không gọi `siteverify` qua mạng. Việc verify là trách nhiệm của server dưới test.
 - Không hỗ trợ reCAPTCHA v3/Enterprise, hCaptcha Enterprise ngoài các test key nêu trên, hay site key thật của bất kỳ provider nào.
 - Chỉ đọc `NODE_ENV` để nhận biết môi trường. Nếu staging chạy với `NODE_ENV=production` thì tool sẽ từ chối.
 - Test key và token được sao chép thủ công từ tài liệu. Nếu provider thay đổi, cần cập nhật `TEST_KEYS`.
 - Chưa có quy tắc làm tròn, nên mọi kết quả thập phân vô hạn đều bị từ chối.
-- `code` hiện chỉ có ở kết quả của loại `text`; các loại khác sẽ được chuẩn hoá ở Phase 2.
+- `code` hiện chỉ có ở kết quả của loại `text` và `image`; các loại widget sẽ được chuẩn hoá ở Phase 2.
 
 ---
 
@@ -131,7 +153,7 @@ Các provider đều cảnh báo rằng test key **không có khả năng chốn
 
 OCR tổng quát cho ảnh văn bản thông thường: ảnh chụp màn hình, ảnh scan, ảnh văn bản tổng hợp, dataset nghiên cứu được phép dùng.
 
-Module được giữ **độc lập** với `captcha_solver.js`. Lý do: `solve()` là API giải CAPTCHA, nếu nối OCR vào `solve('image')` thì module sẽ thành công cụ giải CAPTCHA ảnh, nằm ngoài phạm vi của repo. Module không gọi mạng, không tương tác với website, và không có bước xử lý nào nhắm vào chữ bị làm méo có chủ đích.
+Module là engine phía sau `solve('image')` (xem [`image`](#image)), và cũng dùng trực tiếp được qua `recognizeImage()`. Module không gọi mạng, không tương tác với website, và không có bước xử lý nào nhắm vào chữ bị làm méo có chủ đích.
 
 ### Kiến trúc
 
@@ -260,7 +282,8 @@ Default được chọn **chỉ dựa trên split `dev`**. Trên dev, `contrast`
 
 ```bash
 npm test                                       # toàn bộ: captcha_solver + image_ocr
-node --test image_ocr/integration.test.js      # chỉ phần dùng Tesseract thật
+node --test captcha_solver.image.test.js       # solve('image') với OCR thật, không mock
+node --test image_ocr/integration.test.js      # recognizeImage() với Tesseract thật
 ```
 
 Unit test mock engine qua interface adapter, và dùng script shell giả lập để kiểm tra các trường hợp thiếu binary, crash, timeout và thiếu ngôn ngữ. `integration.test.js` chạy Tesseract thật, và tự skip kèm lý do khi máy không có Tesseract. Ảnh test được render trong bộ nhớ. Thư mục tạm chỉ được tạo trong test và bị xoá ở `after()`.

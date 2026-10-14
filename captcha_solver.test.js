@@ -1,6 +1,7 @@
-const { test, describe, beforeEach, afterEach } = require('node:test');
+const { test, describe, beforeEach, afterEach, mock } = require('node:test');
 const assert = require('node:assert/strict');
 const { solve, Status, ErrorCode, TEST_KEYS } = require('./captcha_solver');
+const imageOcr = require('./image_ocr');
 
 const originalEnv = process.env.NODE_ENV;
 
@@ -213,14 +214,70 @@ describe('solve: text input validation', () => {
   });
 });
 
+// Unit tests with the OCR module mocked. captcha_solver.image.test.js runs the real engine.
 describe('solve: image', () => {
-  for (const input of [undefined, { image: Buffer.from('png') }, 'captcha.png']) {
-    test(`is unsupported for input ${JSON.stringify(input)}`, async () => {
-      const result = await solve('image', input);
-      assert.equal(result.status, Status.UNSUPPORTED);
-      assert.match(result.error, /not implemented/);
+  const ocrSuccess = (value) => ({ status: 'success', type: 'image_ocr', value, metadata: { textDetected: value.length > 0 } });
+  const mockOcr = (implementation) => mock.method(imageOcr, 'recognizeImage', implementation);
+
+  beforeEach(() => setEnv('test'));
+  afterEach(() => mock.restoreAll());
+
+  test('passes input.image to the OCR module unchanged and returns its text', async () => {
+    const recognize = mockOcr(async () => ocrSuccess('Hello world'));
+    const image = Buffer.from('image bytes');
+    assert.deepEqual(await solve('image', { image }), { status: Status.SUCCESS, type: 'image', value: 'Hello world' });
+    assert.equal(recognize.mock.callCount(), 1);
+    assert.equal(recognize.mock.calls[0].arguments[0], image);
+  });
+
+  test('OCR failures keep their code and message, without a value', async () => {
+    mockOcr(async () => ({ status: 'failure', type: 'image_ocr', code: 'ENGINE_ERROR', stage: 'engine', error: 'The OCR engine failed', metadata: {} }));
+    assert.deepEqual(await solve('image', { image: Buffer.from('x') }), {
+      status: Status.FAILURE,
+      type: 'image',
+      code: 'ENGINE_ERROR',
+      error: 'The OCR engine failed',
     });
-  }
+  });
+
+  test('an image without text is a failure, never an empty answer', async () => {
+    mockOcr(async () => ocrSuccess(''));
+    const result = await solve('image', { image: Buffer.from('x') });
+    assert.equal(result.status, Status.FAILURE);
+    assert.equal(result.code, ErrorCode.NO_TEXT_DETECTED);
+    assert.equal(result.value, undefined);
+  });
+
+  test('an unexpected OCR exception is never reported as success', async () => {
+    mockOcr(async () => {
+      throw new Error('boom');
+    });
+    assert.deepEqual(await solve('image', { image: Buffer.from('x') }), {
+      status: Status.FAILURE,
+      type: 'image',
+      code: ErrorCode.INTERNAL_ERROR,
+      error: 'The OCR module could not run',
+    });
+  });
+
+  test('missing or malformed input reaches the OCR module, which rejects it', async () => {
+    for (const input of [undefined, null, {}, 'captcha.png', { image: 42 }]) {
+      const result = await solve('image', input);
+      assert.equal(result.status, Status.FAILURE);
+      assert.equal(result.code, 'INVALID_INPUT');
+    }
+  });
+
+  test('is refused outside test environments without running OCR', async () => {
+    const recognize = mockOcr(async () => ocrSuccess('Hello'));
+    for (const env of ['production', 'Development', '', undefined]) {
+      setEnv(env);
+      const result = await solve('image', { image: Buffer.from('x') });
+      assert.equal(result.status, Status.UNSUPPORTED);
+      assert.match(result.error, /NODE_ENV/);
+    }
+    assert.equal(recognize.mock.callCount(), 0);
+  });
 });
 
 describe('solve: widget providers', () => {
