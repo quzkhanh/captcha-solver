@@ -13,6 +13,8 @@ Khi không xử lý được, tool trả về `failure` hoặc `unsupported`. To
 
 `solve('image')` dùng module **OCR tổng quát** cho ảnh văn bản thông thường, xem [Module Image OCR](#module-image-ocr-image_ocr).
 
+Repo còn có module **Object Detection** độc lập (`object_detection/`) cho ảnh chụp thông thường. Module này không được `solve()` hay `image_ocr` sử dụng, xem [Module Object Detection](#module-object-detection-object_detection).
+
 ## Cài đặt & chạy test
 
 Yêu cầu Node.js >= 20.9 (do `sharp`). Chỉ `solve('image')` cần `sharp` và Tesseract (xem [cài đặt](#cài-đặt)); `image_ocr` được require lazily, nên các loại khác vẫn chạy khi thiếu hai thứ này.
@@ -383,3 +385,243 @@ await recognizeImage(image, { engine: myEngine });
 - Không có confidence thì bỏ `words` hoặc để `confidence: null`. Module không tự tạo ra score.
 - Nếu engine cần định dạng khác PNG hoặc đã có tiền xử lý riêng, truyền `preprocessing: false`.
 - Có thể đưa engine vào benchmark bằng cách thay `createTesseractAdapter(...)` trong `scripts/benchmark.js`.
+
+---
+
+## Module Object Detection (`object_detection/`)
+
+Nhận diện vật thể tổng quát trong ảnh chụp thông thường (80 lớp COCO: người, xe, động vật, đồ vật trong nhà...). Trả về danh sách `className`, `boundingBox`, `confidence`.
+
+Module **độc lập** với `image_ocr/` và `captcha_solver.js`: không import chéo, không được `solve()` gọi tới, và không có handler CAPTCHA nào dùng nó. Module không gọi mạng lúc chạy (model nằm sẵn trên đĩa), không tương tác với website, và **không** được thiết kế hay tinh chỉnh cho ảnh thử thách CAPTCHA. Chỉ đánh giá trên dataset được phép dùng (xem [Dataset](#dataset)).
+
+### Chọn model
+
+| | YOLOX-Tiny (mặc định) | YOLOX-Nano |
+|---|---|---|
+| Nguồn | [Megvii YOLOX](https://github.com/Megvii-BaseDetection/YOLOX), bản ONNX chính thức `0.1.1rc0` | như bên trái |
+| Giấy phép | Apache-2.0 | Apache-2.0 |
+| Kích thước file | 20 MB | 3.6 MB |
+| Đầu vào | 416×416, BGR, 0–255, letterbox pad 114 | như bên trái |
+| COCO val2017 mAP@.5:.95 (tác giả công bố) | 32.8 | 25.8 |
+
+Lý do chọn:
+
+- **Giấy phép**: Apache-2.0. Không dùng YOLOv5/v8/11 vì Ultralytics phát hành theo AGPL-3.0.
+- **Môi trường**: chạy CPU qua `onnxruntime-node`, không cần GPU, Python hay build native. Máy thử là Intel i5-10400, không có GPU.
+- **Độ trễ**: khoảng 20–40 ms/ảnh trên CPU, đủ nhanh để test và benchmark trong vài giây.
+- **Post-processing đơn giản**: grid decode và NMS viết bằng JS thuần, nên test được từng bước.
+
+### Kiến trúc
+
+```
+detectObjects(source, options)                          object_detection/index.js
+  │  kiểm tra options (thresholds, maxDetections, limits, detector)  → INVALID_OPTIONS
+  ├─ validator             object_detection/validator.js    → stage "input"
+  │    đọc file/Buffer, giới hạn byte, magic bytes, kích thước min/max, decode đầy đủ → sRGB 3 kênh
+  ├─ Detector adapter      object_detection/yolox_adapter.js → stage "model" / "inference"
+  │    letterbox → tensor BGR planar → onnxruntime-node → decode + NMS → toạ độ ảnh gốc
+  │    yolox_postprocess.js (anchor grid, decode, NMS: hàm thuần) · models.js (registry + SHA-256)
+  └─ chuẩn hoá kết quả: kiểm tra output của adapter, đổi sang {x, y, width, height}, lọc ngưỡng, sắp xếp, cắt maxDetections
+evaluator.js              mAP@.5, mAP@.5:.95, precision/recall/F1 (chỉ dùng cho benchmark và test)
+scripts/detect.js · scripts/od_download_model.js · scripts/od_prepare_dataset.js · scripts/od_benchmark.js
+```
+
+### Yêu cầu môi trường
+
+| Thành phần | Phiên bản đã kiểm tra | Ghi chú |
+|---|---|---|
+| Node.js | 24.19 | Tối thiểu 20.9 |
+| `onnxruntime-node` | 1.30.0 | Dependency mới. Có prebuilt binary cho Linux/macOS/Windows x64 và arm64. Được `require` lazily: thiếu package này thì chỉ `detectObjects` báo `DEPENDENCY_MISSING`, các module khác vẫn chạy |
+| `sharp` | 0.35.5 | Dùng chung dependency với `image_ocr` (không dùng chung code) |
+| `unzip` | bất kỳ | Chỉ cần khi chuẩn bị dataset |
+
+`npm install` có thể cảnh báo `allow-scripts` cho `onnxruntime-node`. Script `postinstall` đó chỉ tải thêm binary CUDA/TensorRT; bản CPU đã nằm sẵn trong package, nên không cần chạy.
+
+### Cài đặt
+
+```bash
+npm install
+npm run od:model                     # tải YOLOX-Tiny vào models/ (git-ignored), kiểm tra SHA-256
+npm run od:model -- --model all      # tải cả YOLOX-Nano
+```
+
+Hash không khớp thì file không được lưu. Chạy lại khi file đã đúng hash sẽ không tải lại.
+
+### Chạy thử
+
+```bash
+npm run detect -- path/to/photo.jpg
+# person         0.906  x=498.3 y=103.8 w=141.2 h=319.4
+# handbag        0.686  x=494 y=193.9 w=105.8 h=209.6
+npm run detect -- photo.jpg --model yolox-nano --score 0.5 --json
+```
+
+```js
+const { detectObjects, createYoloxAdapter } = require('./object_detection');
+
+const detector = createYoloxAdapter();          // { model: 'yolox-nano' } | { modelPath, classNames } | { threads }
+const result = await detectObjects('photo.jpg', { detector, scoreThreshold: 0.3 });
+if (result.status === 'success') {
+  for (const { className, boundingBox, confidence } of result.detections) { /* ... */ }
+}
+await detector.release();                       // giải phóng session ONNX khi không dùng nữa
+```
+
+Không truyền `detector` thì module dùng một YOLOX-Tiny dùng chung, nạp ở lần gọi đầu tiên. Một adapter có thể được gọi đồng thời nhiều lần.
+
+### Kết quả trả về
+
+`detectObjects()` luôn resolve, không throw.
+
+```js
+{
+  status: 'success',
+  type: 'object_detection',
+  detections: [
+    { className: 'person', boundingBox: { x: 379.3, y: 67.9, width: 121.4, height: 280 }, confidence: 0.8928 },
+  ],
+  metadata: {
+    model: 'yolox-tiny',
+    image: { format: 'jpeg', width: 640, height: 427 },
+    scoreThreshold: 0.3, iouThreshold: 0.45,
+    inferenceMs: 21.4, processingTimeMs: 27.9,
+  },
+}
+```
+
+- `boundingBox` tính bằng pixel của ảnh đầu vào **sau khi xoay theo EXIF**, gốc ở góc trên trái, làm tròn 0.1 px, luôn nằm trong ảnh.
+- `confidence` = objectness × class score của model, trong khoảng 0–1, làm tròn 4 chữ số. Đây là điểm của model, **không** phải xác suất đã hiệu chỉnh.
+- Danh sách được sắp theo `confidence` giảm dần. Không tìm thấy gì thì `detections: []` và vẫn là `success`.
+
+| Option | Mặc định | Ý nghĩa |
+|---|---|---|
+| `scoreThreshold` | 0.3 | Bỏ detection có confidence thấp hơn. Chọn theo F1 trên split **dev** |
+| `iouThreshold` | 0.45 | Ngưỡng NMS theo từng lớp (giá trị mặc định của YOLOX demo) |
+| `maxDetections` | 100 | Số detection tối đa |
+| `limits` | `{ maxBytes: 20 MiB, maxDimension: 10000, maxPixels: 25M, minDimension: 16 }` | Giới hạn đầu vào |
+| `detector` | YOLOX-Tiny dùng chung | Adapter bất kỳ (xem [Thay model](#thay-model)) |
+
+Khi `failure`:
+
+| `code` | `stage` | Khi nào |
+|---|---|---|
+| `INVALID_OPTIONS` | input | Option sai kiểu, ngoài khoảng, limit không tồn tại, detector không đúng interface |
+| `INVALID_INPUT` | input | Input không phải Buffer/Uint8Array/đường dẫn |
+| `FILE_NOT_FOUND` | input | Đường dẫn không tồn tại hoặc không phải file |
+| `EMPTY_INPUT` / `FILE_TOO_LARGE` | input | 0 byte / vượt `maxBytes` |
+| `UNSUPPORTED_FORMAT` | input | Magic bytes không thuộc PNG, JPEG, WebP, GIF, TIFF (SVG bị từ chối có chủ đích) |
+| `CORRUPTED_IMAGE` | input | Header hỏng, file bị cắt cụt, decode thất bại |
+| `IMAGE_TOO_LARGE` / `IMAGE_TOO_SMALL` | input | Vượt `maxDimension`/`maxPixels` / một cạnh < `minDimension` |
+| `DEPENDENCY_MISSING` | model | Chưa cài `onnxruntime-node` |
+| `MODEL_NOT_FOUND` | model | Chưa tải file model (`npm run od:model`) |
+| `MODEL_INVALID` | model | File không phải ONNX, hoặc input/output không đúng layout YOLOX, hoặc số lớp không khớp `classNames` |
+| `INFERENCE_FAILED` | inference | Runtime lỗi khi chạy, hoặc adapter trả output sai định dạng |
+| `INTERNAL_ERROR` | internal | Lỗi không lường trước |
+
+Message lỗi không chứa stack trace hay lỗi gốc của native runtime. Lỗi model không bị cache: tải model xong thì lần gọi sau chạy được ngay.
+
+### Thay model
+
+Adapter là object bất kỳ có `name` và `detect(image, { scoreThreshold, iouThreshold, maxDetections })`:
+
+- `image` là `{ data, width, height, channels: 3 }`: pixel sRGB 8-bit đã được validator decode.
+- Trả về `Array<{ className, confidence, box: [x1, y1, x2, y2] }>` theo pixel ảnh gốc.
+- Ném `DetectionError` với code thuộc stage `model`/`inference` để báo lỗi có phân loại. Mọi lỗi khác bị đổi thành `INFERENCE_FAILED`.
+
+`detectObjects()` kiểm tra output (box nằm trong ảnh, confidence trong 0–1, `className` khác rỗng), nên một adapter lỗi không thể làm hỏng schema kết quả.
+
+- **Model YOLOX khác** (S/M/L, kích thước đầu vào khác, hoặc model tự train): `createYoloxAdapter({ modelPath, classNames })`. Kích thước đầu vào được đọc từ metadata của model; số lớp phải khớp `classNames`. Để model có trong `npm run od:model`, thêm một mục vào `object_detection/models.js` kèm URL và SHA-256.
+- **Kiến trúc khác** (SSD, RT-DETR, D-FINE...): viết adapter mới cùng interface. API `detectObjects()` và benchmark không phải sửa (benchmark hiện tạo adapter bằng `createYoloxAdapter`, nên chỉ cần đổi dòng đó).
+
+### Dataset
+
+```bash
+npm run od:dataset          # dev: 60 ảnh, test: 200 ảnh; mỗi split thêm 20 composite, 5 negative, 5 invalid
+```
+
+Script tải annotation COCO 2017 (~253 MB, chỉ một lần, file zip bị xoá sau khi giải nén) và ảnh vào `dataset/object_detection/` (git-ignored). Không có ảnh nào được commit vào repo.
+
+| Nhóm | Nguồn | Ground truth |
+|---|---|---|
+| `coco` | Ảnh COCO val2017 (Flickr) **chỉ** với license CC BY 2.0, CC BY-SA 2.0 hoặc "No known copyright restrictions" (1279/5000 ảnh đủ điều kiện). Ảnh NonCommercial và NoDerivs không bao giờ được tải. COCO val2017 không nằm trong tập train của YOLOX | Annotation COCO (CC BY 4.0), có cờ `iscrowd` |
+| `composite` | **Ảnh tự tạo**: cắt một vật thể từ ảnh nhóm `coco`, scale 0.5–1.5×, dán lên nền phẳng với kích thước lệch tỷ lệ (640×480, 480×640, 800×400, 416², 1024×768), xen kẽ JPEG/PNG/WebP | Đúng hình chữ nhật đã dán, biết chính xác từng pixel |
+| `negative` | Ảnh tự tạo: trắng, xám, gradient, nhiễu, sọc | Không có vật thể; mọi detection đều là false positive |
+| `invalid` | File rỗng, file text, JPEG cắt cụt, PNG 8×8, SVG | Mã lỗi mong đợi |
+
+- `dev` và `test` dùng hai tập ảnh khác nhau (chọn bằng seed cố định). Ngưỡng mặc định được chọn trên dev; kết quả báo cáo dưới đây là của test.
+- Mỗi split có `ATTRIBUTION.md` ghi license và nguồn Flickr của từng ảnh, theo yêu cầu ghi công của CC BY/BY-SA. Ảnh `composite` là tác phẩm phái sinh: `labels.json` ghi ảnh gốc và cách chỉnh sửa. Nếu phân phối lại ảnh BY-SA thì phải giữ cùng license.
+- Đã kiểm tra: không ảnh nào có EXIF orientation khác 1, nên annotation COCO khớp với ảnh sau khi auto-orient.
+
+### Chạy test
+
+```bash
+npm test                                     # toàn bộ repo
+node --test 'object_detection/*.test.js'     # chỉ module này
+```
+
+- **Unit test** (không cần model): validator (mọi định dạng, ảnh xám, alpha, EXIF, mọi mã lỗi đầu vào), decode/NMS/IoU với tensor viết tay, letterbox và chuyển BGR, evaluator (AP, crowd, P/R), schema và mapping lỗi của `detectObjects()`. Riêng `DEPENDENCY_MISSING` được kiểm tra trong một process con có `onnxruntime-node` bị ẩn khỏi `require`.
+- Unit test của `index.js` dùng một **stub detector** trả box cố định. Stub này chỉ dùng để kiểm tra phần xử lý kết quả và mapping lỗi, không được dùng để kết luận model nhận diện đúng.
+- **Integration test** (`integration.test.js`) chạy **model thật**, không có stub nào:
+  - ảnh trắng, xám, nhiễu cho ra 0 detection;
+  - người lớn nhất trong ảnh dev được định vị với IoU ≥ 0.7 so với box COCO;
+  - box dịch đúng khi ảnh được pad thêm viền lệch và khi ảnh bị lật ngang (IoU ≥ 0.7);
+  - PNG, JPEG và WebP lossless của cùng một ảnh cho cùng kết quả;
+  - gọi đồng thời cho kết quả giống hệt gọi tuần tự;
+  - mAP@.5 trên dev ≥ 45% (ngưỡng chống regression; con số đo được là 58%);
+  - `classNames` sai số lớp trả `MODEL_INVALID`;
+  - `release()` rồi gọi lại thì model được nạp lại.
+
+  Test tự skip và in lý do khi thiếu model hoặc dataset.
+- Đã kiểm tra rằng test bắt được lỗi thật: cố ý bỏ bước chia `scale` khi đổi toạ độ thì 3 integration test fail.
+
+Kết quả lần chạy cuối: `npm test` → **388/388 pass**, 0 skip (316 test cũ + 72 test mới).
+
+### Chạy benchmark
+
+```bash
+npm run od:benchmark                                          # split test, cả hai model
+node scripts/od_benchmark.js --split dev --models yolox-tiny --threads 4
+```
+
+Kết quả in dạng Markdown và lưu vào `benchmark-results/object_detection/<split>.{md,json}`. Mỗi model chạy trong một process con riêng để số đo bộ nhớ không bị lẫn giữa các model.
+
+- **Accuracy**: chạy với `scoreThreshold: 0.01` để tính mAP@.5 và mAP@.5:.95 (AP nội suy 101 điểm kiểu COCO, trung bình trên các lớp có ground truth). P/R/F1 ở ngưỡng mặc định được tính từ chính các detection đó sau khi lọc. Cách này cho kết quả chính xác vì NMS tham lam không bao giờ để box điểm thấp loại box điểm cao. Kèm theo: bảng quét ngưỡng, AP theo lớp, recall và IoU trên nhóm composite, số false positive trên nhóm negative, số input lỗi bị từ chối đúng mã.
+- **Latency**: lần chạy thứ hai với option mặc định, sau 3 lần warm-up, tính end-to-end trong `detectObjects` (đọc file, decode, letterbox, inference, NMS). Cũng đo thời gian nạp model.
+- **Memory**: RSS trước khi nạp, sau khi nạp và đỉnh trong suốt quá trình chạy (`process.resourceUsage().maxRSS`).
+
+### Kết quả thực tế
+
+Split `test`: 200 ảnh COCO (1531 box), 20 composite, 5 negative, 5 invalid. Node 24.19, onnxruntime-node 1.30.0, Intel i5-10400 (12 luồng), số thread mặc định của onnxruntime, chạy ngày 2026-10-14.
+
+| Model | mAP@.5:.95 | mAP@.5 | Precision@0.3 | Recall@0.3 | F1@0.3 | Composite: đúng lớp + IoU≥.5 | Composite: định vị được (mọi lớp) | FP trên negative | Invalid bị từ chối đúng |
+|---|---|---|---|---|---|---|---|---|---|
+| **yolox-tiny** | **38.8%** | **56.3%** | 72.1% | 45.0% | 55.4% | 10/20 | 13/20 | 0 / 5 ảnh | 5/5 |
+| yolox-nano | 30.3% | 49.2% | 69.9% | 37.6% | 48.9% | 8/20 | 12/20 | 0 / 5 ảnh | 5/5 |
+
+| Model | Nạp model | Mean | p50 | p95 | Riêng inference | RSS sau khi nạp | RSS đỉnh |
+|---|---|---|---|---|---|---|---|
+| yolox-tiny | 85 ms | 38.2 ms | 37.5 ms | 52.0 ms | 29.2 ms | 144 MB | 277 MB |
+| yolox-nano | 65 ms | 20.5 ms | 19.9 ms | 28.8 ms | 12.1 ms | 111 MB | 254 MB |
+
+RSS của process Node trước khi nạp model là 68 MB.
+
+Đọc kết quả:
+
+- **Đối chiếu với pycocotools**: các detection YOLOX-Tiny trên đúng 200 ảnh test được chấm bằng `pycocotools` chính thức, cho mAP@.5:.95 = 38.9% và mAP@.5 = 56.6%. Evaluator của repo cho 38.75% và 56.33%, lệch ≤ 0.3 điểm. Theo pycocotools, AP theo kích thước vật thể là small 17.0%, medium 37.7%, large 63.2%.
+- mAP đo được **cao hơn** con số tác giả công bố (32.8%). Nguyên nhân là tập con 200 ảnh có phân bố lớp và kích thước vật thể khác với toàn bộ 5000 ảnh val2017; nhiều lớp chỉ có 1–5 box nên AP từng lớp dao động mạnh. Không nên coi đây là con số thay thế cho kết quả công bố.
+- Trên dev, F1 gần như phẳng trong khoảng ngưỡng 0.2–0.35 (58.6% → 57.7%). Ngưỡng 0.3 được chọn vì cho F1 cao nhất trên dev; ngưỡng 0.5 cho precision 84% nhưng recall chỉ còn 38%.
+- Nhóm composite: khi model tìm được vật thể thì IoU đạt 0.84–0.98, cho thấy phép ánh xạ toạ độ qua các tỷ lệ ảnh lệch là đúng. Các ca trượt là vật thể phụ thuộc ngữ cảnh khi bị cắt khỏi cảnh (couch, chair, tv, vase, broccoli), hoặc nhầm lớp (backpack thành person đang đeo nó, tennis racket thành kite, dog thành teddy bear).
+- Lớp yếu nhất ở test: book 9.9%, backpack 16.0%, handbag 21.4%, bird 24.7%, bottle 25.0%, chair 25.5% (AP@.5). Đây đều là vật thể nhỏ hoặc hay bị che khuất.
+- Latency dao động theo tải máy: cùng model, trên dev đo được mean 28 ms, trên test 38 ms (máy đang chạy các tác vụ khác). Lần gọi đầu tiên không warm-up mất khoảng 130 ms.
+
+### Giới hạn của model
+
+- **Chỉ có 80 lớp COCO.** Vật thể ngoài danh sách sẽ bị bỏ qua hoặc gán sang lớp gần nhất.
+- **Vật thể nhỏ**: đầu vào bị thu về 416×416. Với ảnh 4000×3000, một vật thể 100 px chỉ còn khoảng 10 px, nên AP vật thể nhỏ chỉ khoảng 17%. Module không chia ảnh thành ô (tiling).
+- **Ảnh lệch phân phối** (ảnh vẽ, icon, ảnh chụp màn hình, ảnh y tế/vệ tinh, ảnh bị làm nhiễu có chủ đích): chưa được đánh giá, độ chính xác không được đảm bảo.
+- `confidence` chưa được hiệu chỉnh. Muốn dùng như xác suất thì phải hiệu chỉnh trên dữ liệu của mình.
+- Chỉ xử lý khung đầu tiên của GIF động / TIFF nhiều trang. Không có tracking giữa các khung hình.
+- Chỉ chạy CPU. Muốn dùng GPU thì phải bật execution provider CUDA (và chạy `postinstall` của `onnxruntime-node`); chưa được kiểm tra.
+- Dataset đánh giá nhỏ (200 ảnh test), nên khác biệt 1–2 điểm giữa các cấu hình chưa có ý nghĩa thống kê. mAP của evaluator trong repo khớp với pycocotools trên split này nhưng không chia theo kích thước vật thể.
+- Bộ nhớ: mỗi adapter giữ một session ONNX (~75 MB với Tiny). Gọi `release()` khi không dùng nữa. Module không giới hạn số lần gọi đồng thời; nếu cần, người gọi tự giới hạn.
+- Đã kiểm tra trên Linux x64. macOS/Windows chưa được kiểm tra.

@@ -10,9 +10,14 @@
     "test": "node --test",
     "ocr": "node scripts/ocr.js",
     "dataset": "node scripts/generate_dataset.js",
-    "benchmark": "node scripts/benchmark.js"
+    "benchmark": "node scripts/benchmark.js",
+    "detect": "node scripts/detect.js",
+    "od:model": "node scripts/od_download_model.js",
+    "od:dataset": "node scripts/od_prepare_dataset.js",
+    "od:benchmark": "node scripts/od_benchmark.js"
   },
   "dependencies": {
+    "onnxruntime-node": "1.30.0",
     "sharp": "0.35.5"
   }
 }
